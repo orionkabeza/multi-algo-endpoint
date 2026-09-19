@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime snapshots are regenerated on every request; keep only the README samples
+snapshots/*.png
+!snapshots/sample_*.png
