@@ -5,3 +5,8 @@ __pycache__/
 # Runtime snapshots are regenerated on every request; keep only the README samples
 snapshots/*.png
 !snapshots/sample_*.png
+# Local SQLite database created by models.py; not shared between machines
+analysis.db
+
+# JSON files saved via POST /save
+data/

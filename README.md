@@ -80,9 +80,35 @@ The minimum input size is always **0**, so the sizes measured are `0, step, 2*st
 
 Returns every supported algorithm with its Big-O label and the largest `n_max` it accepts, e.g. `"fibonacci_recursive": {"complexity": "O(2^n)", "max_n": 35}`. `GET /` returns a short usage message.
 
+### `POST /save`
+
+Saves an arbitrary JSON request body to a file under `data/`, e.g. to persist a result from `/analyze`.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `name` | no | Filename to save as (query string). Sanitized with `werkzeug.utils.secure_filename`, so `../../etc/passwd` is reduced to `passwd`, not written outside `data/`. `.json` is appended if missing. Omit it and a timestamped name is generated, e.g. `data_20260923_134410_214138.json`. |
+
+Request body must be valid JSON with `Content-Type: application/json`.
+
+```bash
+curl -X POST "http://localhost:8000/save?name=my_result" -H "Content-Type: application/json" -d '{"algo":"linear_search","seconds":0.0001}'
+```
+
+**Response (201)**
+
+```json
+{
+  "saved_path": "C:\\...\\data\\my_result.json",
+  "filename": "my_result.json",
+  "data": {"algo": "linear_search", "seconds": 0.0001}
+}
+```
+
+**Errors (400)**: request body missing or not valid JSON, or `name` sanitizes to an empty string (e.g. `name=../..`).
+
 ## Supported algorithms
 
-14 algorithms, covering every common complexity class. The first four are the required ones.
+21 algorithms, covering every common complexity class. The first four are the required ones.
 
 | `algo` | Complexity | Input used for the timing | Largest `n_max` |
 |--------|-----------|---------------------------|----------------:|
@@ -100,6 +126,22 @@ Returns every supported algorithm with its Big-O label and the largest `n_max` i
 | `matrix_multiplication` | O(n^3) | Two random n x n matrices, triple loop | 250 |
 | `fibonacci_recursive`   | O(2^n) | `fib(n)` by plain recursion | 35 |
 | `permutations`          | O(n!)  | Visits every ordering of n items | 10 |
+
+### Stack & queue algorithms
+
+Built on the `Stack` and `Queue` classes in [`stack_queue.py`](stack_queue.py) (see [Data structures](#data-structures) below).
+
+| `algo` | Complexity | Input used for the timing | Largest `n_max` |
+|--------|-----------|---------------------------|----------------:|
+| `stack_push_pop`              | O(n)   | Push n items onto a `Stack`, then pop them all | 1,000,000 |
+| `queue_enqueue_dequeue`       | O(n)   | Enqueue n items onto a `Queue` (deque-backed), then dequeue them all | 1,000,000 |
+| `naive_queue_enqueue_dequeue` | O(n^2) | Same, but with `NaiveQueue` (list-backed, `pop(0)`) — shown for contrast with `queue_enqueue_dequeue` | 10,000 |
+| `balanced_parentheses`        | O(n)   | Fully nested `()[]{}` brackets, e.g. `"(((...)))"` (worst case stack depth) | 1,000,000 |
+| `next_greater_elements`       | O(n)   | Random list; monotonic-stack scan — the nested loop is amortized O(n) since each index is pushed/popped once | 1,000,000 |
+| `bfs_traversal`                | O(n)   | Breadth-first traversal of a path graph, using a `Queue` | 1,000,000 |
+| `tower_of_hanoi`               | O(2^n) | Classic 3-peg Tower of Hanoi solved with three `Stack`s | 20 |
+
+`naive_queue_enqueue_dequeue` vs. `queue_enqueue_dequeue` is the classic list-vs-deque lesson: at n=8,000 the list-backed version is about 60x slower, because `list.pop(0)` shifts every remaining element while `deque.popleft()` is O(1).
 
 The last three grow so fast that `n` means something much smaller for them. Call them with a small `n_max` and `step=1`:
 
@@ -148,14 +190,36 @@ http://localhost:8000/analyze?algo=bubble_sort&step=10&n_max=1000
 
 *`bubble_sort` over n = 0 to 1,000: the curve bends upward, which is O(n^2).*
 
+## Data structures
+
+[`stack_queue.py`](stack_queue.py) has plain, dependency-free implementations used by the algorithms above:
+
+- **`Stack`** — LIFO, backed by a list (`push`/`pop` at the end, both O(1)).
+- **`Queue`** — FIFO, backed by `collections.deque` (`enqueue`/`dequeue`, both O(1)).
+- **`NaiveQueue`** — FIFO, backed by a plain list. `dequeue()` is O(n) (`list.pop(0)` shifts everything left); kept only to contrast with `Queue` in the benchmarks above.
+
+All three raise `StackEmptyError` / `QueueEmptyError` (subclasses of `IndexError`) on `pop`/`dequeue`/`peek` from empty, rather than silently returning `None`.
+
+## Running tests
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -p "test_*.py" -v
+```
+
+`test_stack_queue.py` covers `Stack`/`Queue`/`NaiveQueue` behavior (LIFO/FIFO order, empty-structure errors, `None` values, refilling), correctness of the stack/queue algorithms above, and integration with the visualizer (`measure()`, `/analyze`, `/algorithms`). `test_save_endpoint.py` covers `POST /save`, including that a path-traversal `name` (e.g. `../../etc/passwd`) is sanitized and stays inside `data/`.
+
 ## Project structure
 
 ```
 app.py            Flask app: routes, input parsing, validation
-algorithms.py     The 14 algorithms plus the ALGORITHMS registry (with per-algorithm n_max limits)
+algorithms.py     The algorithms plus the ALGORITHMS registry (with per-algorithm n_max limits)
+stack_queue.py    Stack, Queue and NaiveQueue data structures
 visualizer.py     Timing (measure) and graph/snapshot/base64 (render)
+test_stack_queue.py   Unit tests for the data structures, their algorithms, and the visualizer integration
+test_save_endpoint.py Unit tests for POST /save
 requirements.txt  Pinned dependencies
 snapshots/        PNGs saved on each request (only the samples are committed)
+data/             JSON files saved via POST /save (gitignored)
 ```
 
 ### Adding an algorithm
