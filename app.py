@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, request
+from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, jwt_required
 from werkzeug.utils import secure_filename
 
 from algorithms import ALGORITHMS
@@ -15,8 +16,13 @@ MAX_POINTS = 2000
 DATA_DIR = Path(__file__).parent / "data"
 
 app = Flask(__name__)
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "")
+jwt = JWTManager(app)
 init_db()  # Initialize the database when the app starts
 benchmark_lock = threading.Lock()
+
+DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "analyst")
+DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "changeme")
 
 
 def clean(value):
@@ -28,6 +34,20 @@ def parse_int(name, raw):
         return int(clean(raw).replace(",", "").replace("_", ""))
     except ValueError:
         raise ValueError(f"'{name}' must be a whole number, got {raw!r}")
+
+@jwt.unauthorized_loader
+def missing_token(reason):
+    return jsonify(error="I don't know you"), 401
+
+
+@jwt.invalid_token_loader
+def bad_token(reason):
+    return jsonify(error="Bye"), 401
+
+
+@jwt.expired_token_loader
+def expired_token(header, payload):
+    return jsonify(error="Bye"), 401
 
 
 @app.get("/")
@@ -119,7 +139,18 @@ def save_json():
 
     return jsonify(saved_path=str(path), filename=name, data=payload), 201
 
+
+@app.post("/login")
+def login():
+    body = request.get_json(silent=True) or {}
+    if body.get("username") != DEMO_USERNAME or body.get("password") != DEMO_PASSWORD:
+        return jsonify(error="bad username or password"), 401
+    token = create_access_token(identity=body["username"])
+    return jsonify(access_token=token), 200
+
+
 @app.post("/save_analysis")
+@jwt_required()
 def save_analysis_endpoint():
     result = request.get_json(silent=True)
     if result is None:
@@ -128,7 +159,7 @@ def save_analysis_endpoint():
         analysis_id = save_analysis(result)
     except KeyError as e:
         return jsonify(error=f"missing field {e}"), 400
-    return jsonify(id=analysis_id), 201
+    return jsonify(id=analysis_id, saved_by=get_jwt_identity()), 201
 
 
 @app.get("/analyses")
